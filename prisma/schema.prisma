@@ -1,0 +1,161 @@
+generator client {
+  provider      = "prisma-client-js"
+  // native — для локальной машины, debian-openssl-3.0.x — для деплоя на Linux
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Пользователи системы: админ (всё) и мастер (ремонты + касса)
+model User {
+  id            Int       @id @default(autoincrement())
+  login         String    @unique
+  passwordHash  String
+  name          String
+  role          String // ADMIN | MASTER
+  isActive      Boolean   @default(true) // false = вход запрещён (уволен)
+  masterPercent Int       @default(30) // процент мастера от прибыли с ремонта
+  createdAt     DateTime  @default(now())
+  sessions      Session[]
+  repairs       RepairOrder[]
+  sales         Sale[]
+}
+
+// Сессии для cookie-авторизации
+model Session {
+  id        String   @id // случайный токен из cookie
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+// Товар: запчасть (PART) для ремонта или товар на продажу (GOODS)
+model Product {
+  id         Int     @id @default(autoincrement())
+  name       String
+  barcode    String? @unique
+  category   String // PART | GOODS
+  podModel   String? // для какой модели подика подходит
+  price      Int // цена продажи, ₽
+  cost       Int     @default(0) // себестоимость, ₽
+  qty        Int     @default(0) // остаток, шт
+  minQty     Int     @default(5) // порог «мало осталось»
+  isActive   Boolean @default(true)
+  createdAt  DateTime @default(now())
+  saleItems  SaleItem[]
+  repairParts RepairOrderPart[]
+  reminders  SaleReminder[]
+}
+
+// Клиент мастерской
+model Client {
+  id             Int      @id @default(autoincrement())
+  name           String
+  phone          String   @unique // нормализованный: только цифры без кода страны
+  passwordHash   String? // пароль личного кабинета (задаёт клиент при регистрации)
+  telegramChatId String?  @unique // заполняет бот после /start
+  createdAt      DateTime @default(now())
+  sessions       ClientSession[]
+  repairs        RepairOrder[]
+  sales          Sale[]
+  notifications  Notification[]
+  reminders      SaleReminder[]
+}
+
+// Сессии личного кабинета клиента (отдельная cookie, не мешает сессиям сотрудников)
+model ClientSession {
+  id        String   @id // случайный токен
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  clientId  Int
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+// Заказ на ремонт
+model RepairOrder {
+  id          Int      @id @default(autoincrement())
+  client      Client   @relation(fields: [clientId], references: [id])
+  clientId    Int
+  deviceModel String
+  problem     String
+  status      String   @default("INTAKE") // INTAKE | DIAGNOSTICS | WAITING_PARTS | IN_WORK | READY | ISSUED
+  price       Int? // итоговая цена для клиента
+  master      User?    @relation(fields: [masterId], references: [id])
+  masterId    Int?
+  accessCode  String? // код для публичной проверки статуса: R-123-KX4P
+  preferredAt DateTime? // желаемое время визита — клиент указывает при записи с сайта
+  readyAt     DateTime? // момент перехода в «Готов» — для напоминания забрать
+  pickupRemindedAt DateTime? // когда уже напомнили «давно не забираете»
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  issuedAt    DateTime? // момент перевода в «Выдан» — для отчёта по зарплате
+  parts       RepairOrderPart[]
+}
+
+// Справочник совместимости: каноническая модель подика и её алиасы
+// (например XROS = «XROS Mini, XROS 3, XROS 3 Mini») — для поиска в кассе
+model Compatibility {
+  id      Int    @id @default(autoincrement())
+  model   String @unique
+  aliases String @default("") // через запятую
+}
+
+// Напоминание «пора сменить картридж» — создаётся после продажи расходника
+model SaleReminder {
+  id        Int       @id @default(autoincrement())
+  client    Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  clientId  Int
+  product   Product   @relation(fields: [productId], references: [id])
+  productId Int
+  dueAt     DateTime // когда пора напомнить
+  sentAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+// Запчасти, списанные на ремонт
+model RepairOrderPart {
+  id        Int         @id @default(autoincrement())
+  order     RepairOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId   Int
+  product   Product     @relation(fields: [productId], references: [id])
+  productId Int
+  qty       Int
+  cost      Int // себестоимость на момент списания
+  createdAt DateTime    @default(now())
+}
+
+// Продажа на кассе
+model Sale {
+  id        Int      @id @default(autoincrement())
+  client    Client?  @relation(fields: [clientId], references: [id])
+  clientId  Int?
+  user      User?    @relation(fields: [userId], references: [id])
+  userId    Int?
+  total     Int
+  createdAt DateTime @default(now())
+  items     SaleItem[]
+}
+
+model SaleItem {
+  id        Int      @id @default(autoincrement())
+  sale      Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  saleId    Int
+  product   Product  @relation(fields: [productId], references: [id])
+  productId Int
+  qty       Int
+  price     Int // цена на момент продажи
+}
+
+// Очередь уведомлений: приложение пишет, бот забирает и рассылает
+model Notification {
+  id        Int       @id @default(autoincrement())
+  client    Client    @relation(fields: [clientId], references: [id])
+  clientId  Int
+  text      String
+  sentAt    DateTime?
+  createdAt DateTime  @default(now())
+}
