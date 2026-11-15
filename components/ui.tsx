@@ -41,7 +41,7 @@ export function Badge({ children, className = "" }: { children: ReactNode; class
 
 export function PageTitle({ children, right }: { children: ReactNode; right?: ReactNode }) {
   return (
-    <div className="mb-5 flex items-center justify-between gap-4">
+    <div className="mb-5 flex flex-wrap items-center justify-between gap-2">
       <h1 className="text-xl font-semibold text-zinc-100">{children}</h1>
       {right}
     </div>

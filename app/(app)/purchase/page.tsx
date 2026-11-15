@@ -38,7 +38,7 @@ export default async function PurchasePage() {
         </Card>
       ) : (
         <>
-          <div className="overflow-hidden rounded-2xl border border-zinc-800">
+          <div className="overflow-x-auto rounded-2xl border border-zinc-800">
             <table className="w-full text-sm">
               <thead className="bg-zinc-900 text-left text-xs uppercase tracking-wide text-zinc-500">
                 <tr>

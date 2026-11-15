@@ -24,15 +24,15 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen flex-col">
       <header className="border-b border-zinc-800 bg-zinc-900/60">
-        <div className="mx-auto flex w-full max-w-6xl items-center gap-1 px-4 py-3">
+        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-1 px-4 py-3">
           <span className="mr-4 font-semibold text-emerald-400">VapeCRM</span>
-          <nav className="flex items-center gap-1">
+          <nav className="flex flex-wrap items-center gap-1">
             {links.map((link) => (
               <NavLink key={link.href} href={link.href} label={link.label} />
             ))}
           </nav>
-          <div className="ml-auto flex items-center gap-3 text-sm text-zinc-400">
-            <span>
+          <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-zinc-400">
+            <span className="max-w-40 truncate sm:max-w-none">
               {user.name} · {roleLabel}
             </span>
             <form action={logoutAction}>
