@@ -20,9 +20,12 @@ git push → GitHub → Vercel автоматически пересобирае
 1. Зайди на [vercel.com](https://vercel.com) → **Continue with GitHub** (вход через GitHub-аккаунт)
 2. Дай Vercel доступ к репозиториям
 3. **Add New… → Project** → найди `vapecrm` → **Import**
-4. На странице импорта пока **ничего не деплой** — сначала база:
-   вкладка **Storage** → **Create Database** → выбери **Neon** → тариф **Free** → Create
-5. Vercel сам создаст аккаунт Neon, базу и подключит переменную `DATABASE_URL` к проекту
+4. На экране импорта: **Build and Output Settings → Build Command → Override →** впиши
+   `npm run build` — это обязательно: стандартная команда Vercel (`next build`) пропустила бы
+   генерацию Prisma-клиента и миграции базы
+5. Нажми **Create Project** — первый деплой **упадёт с ошибкой** (базы ещё нет), это нормально
+6. В проекте: вкладка **Storage** → **Create Database** → выбери **Neon** → тариф **Free** → Create
+7. Vercel сам создаст аккаунт Neon, базу и подключит переменную `DATABASE_URL` к проекту
 
 **Альтернатива:** зарегистрироваться на [neon.tech](https://neon.tech) отдельно
 (тоже через GitHub), создать проект → Dashboard → «Connection Details».
@@ -51,7 +54,7 @@ Neon даёт две строки подключения: пулед (для с�
 
 ## 3. Первый деплой
 
-Вернись в **Deployments** → **Redeploy** (или нажми Deploy, если не деплоил после импорта).
+**Deployments** → в упавшем деплое нажми ⋯ → **Redeploy**.
 
 Сборка автоматически: `prisma generate` → `prisma migrate deploy` (создаёт все таблицы
 в пустой базе Neon) → `next build`. Через ~2 минуты сайт доступен на адресе вида
