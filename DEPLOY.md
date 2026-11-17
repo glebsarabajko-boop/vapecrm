@@ -24,8 +24,10 @@ git push → GitHub → Vercel автоматически пересобирае
    `npm run build` — это обязательно: стандартная команда Vercel (`next build`) пропустила бы
    генерацию Prisma-клиента и миграции базы
 5. Нажми **Create Project** — первый деплой **упадёт с ошибкой** (базы ещё нет), это нормально
-6. В проекте: вкладка **Storage** → **Create Database** → выбери **Neon** → тариф **Free** → Create
-7. Vercel сам создаст аккаунт Neon, базу и подключит переменную `DATABASE_URL` к проекту
+6. Vercel предложит «Optional Integrations» — **ничего не добавляй** (особенно «Prisma Postgres»:
+   это не Neon, а проксируемая база с особым подключением, не совместима с нашей сборкой)
+7. В проекте: вкладка **Storage** → **Create Database** → выбери **Neon** → тариф **Free** → Create
+8. Vercel сам создаст аккаунт Neon, базу и подключит переменную `DATABASE_URL` к проекту
 
 **Альтернатива:** зарегистрироваться на [neon.tech](https://neon.tech) отдельно
 (тоже через GitHub), создать проект → Dashboard → «Connection Details».
