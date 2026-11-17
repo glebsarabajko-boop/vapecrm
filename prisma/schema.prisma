@@ -1,12 +1,15 @@
 generator client {
   provider      = "prisma-client-js"
-  // native — для локальной машины, debian-openssl-3.0.x — для деплоя на Linux
-  binaryTargets = ["native", "debian-openssl-3.0.x"]
+  // native — для локальной машины, rhel-openssl-3.0.x — для Vercel (Amazon Linux 2023)
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  // DATABASE_URL — пулед-строка Neon (…-pooler…): подходит для serverless-функций
+  url       = env("DATABASE_URL")
+  // DIRECT_URL — прямая строка (без -pooler): только для миграций (prisma migrate)
+  directUrl = env("DIRECT_URL")
 }
 
 // Пользователи системы: админ (всё) и мастер (ремонты + касса)

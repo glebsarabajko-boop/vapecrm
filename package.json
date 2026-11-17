@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "prisma generate && prisma migrate deploy && next build",
     "start": "next start",
     "lint": "eslint",
-    "db:init": "prisma db push && prisma db seed",
+    "db:init": "prisma migrate deploy && prisma db seed",
     "db:seed": "prisma db seed",
     "bot": "node bot/index.ts"
   },

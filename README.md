@@ -54,7 +54,7 @@
 
 ## Стек
 
-Next.js 16 + TypeScript + Tailwind (тёмная тема) · Prisma + SQLite · grammY для бота ·
+Next.js 16 + TypeScript + Tailwind (тёмная тема) · Prisma + PostgreSQL (Neon) · grammY для бота ·
 bcrypt + cookie-сессии для авторизации
 
 ## Запуск
@@ -67,11 +67,14 @@ https://vape-crm-ury1.zai-ai.site (установка как приложени�
 
 ```bash
 npm install
-npm run db:init   # создать базу SQLite и залить демо-данные
+npm run db:init   # накатить миграции и залить демо-данные (база Postgres из .env)
 npm run dev       # приложение на http://localhost:3000
 ```
 
 Демо-аккаунты: `admin/admin123` (владелец) и `master/master123` (мастер).
+
+**Прод и автодеплой:** Vercel + Neon — пошаговая настройка в [DEPLOY.md](DEPLOY.md):
+`git push` → сайт пересобирается автоматически, миграции БД применяются сами.
 
 ### Установка как приложение (PWA)
 
