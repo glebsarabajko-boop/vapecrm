@@ -162,3 +162,12 @@ model Notification {
   sentAt    DateTime?
   createdAt DateTime  @default(now())
 }
+
+// Состояние диалога бота с клиентом (привязка телефона, запись на ремонт).
+// В serverless (Vercel) память между вызовами не сохраняется — состояние живёт в БД.
+model BotDialog {
+  chatId    String   @id // id чата Telegram как строка
+  state     String // phone | model | problem | time
+  payload   String   @default("{}") // JSON с накопленными ответами (model, problem)
+  updatedAt DateTime @updatedAt
+}

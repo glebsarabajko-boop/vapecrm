@@ -1,31 +1,48 @@
-// Логика Telegram-бота. Запускается двумя способами:
-//  - автоматически вместе с приложением (instrumentation.ts при старте сервера)
-//  - вручную как отдельный процесс (npm run bot) — если приложение уже держит бота,
-//    второй запуск конфликтует (Telegram отдаёт апдейты только одному поллеру)
+// Логика Telegram-бота. Три способа запуска:
+//  - webhook на Vercel (app/api/telegram/webhook/route.ts) — прод, работает 24/7;
+//    Telegram сам присылает каждое сообщение на наш URL, поллинг не нужен
+//  - long polling вместе с приложением локально (instrumentation.ts)
+//  - отдельный процесс локально (npm run bot) — если приложение не запущено;
+//    два поллера одновременно конфликтуют (Telegram отдаёт апдейты только одному)
+//
+// Состояние диалогов (привязка телефона, запись на ремонт) хранится в БД (BotDialog),
+// а не в памяти: в serverless каждый вызов функции может быть новым процессом.
 import { Bot } from "grammy";
+import type { Update } from "@grammyjs/types";
 import { db } from "./db.ts";
 import { pumpMessaging } from "./messaging.ts";
 import { normalizePhone } from "./format.ts";
 import { parseOrderQuery, generateAccessCode } from "./codes.ts";
 import { statusLabel } from "./repairs.ts";
 
-const awaitingPhone = new Set<number>();
-type BookingStep = "model" | "problem" | "time";
-const bookingFlow = new Map<number, { step: BookingStep; model?: string; problem?: string }>();
+type DialogState = "phone" | "model" | "problem" | "time";
+type DialogPayload = { model?: string; problem?: string };
+
+const getDialog = async (chatId: number): Promise<{ state: DialogState; payload: DialogPayload } | null> => {
+  const row = await db.botDialog.findUnique({ where: { chatId: String(chatId) } });
+  if (!row) return null;
+  let payload: DialogPayload = {};
+  try {
+    payload = JSON.parse(row.payload);
+  } catch {}
+  return { state: row.state as DialogState, payload };
+};
+
+const setDialog = (chatId: number, state: DialogState, payload: DialogPayload = {}) =>
+  db.botDialog.upsert({
+    where: { chatId: String(chatId) },
+    update: { state, payload: JSON.stringify(payload) },
+    create: { chatId: String(chatId), state, payload: JSON.stringify(payload) },
+  });
+
+const clearDialog = (chatId: number) => db.botDialog.deleteMany({ where: { chatId: String(chatId) } });
 
 const clientByChat = (chatId: number) =>
   db.client.findFirst({ where: { telegramChatId: String(chatId) } });
 
-export function startBot(token?: string): boolean {
-  if (!token) {
-    console.warn("[бот] TELEGRAM_BOT_TOKEN не задан — бот не запущен (приложение работает без него)");
-    return false;
-  }
-  // защита от двойного старта (hot reload в dev)
-  const g = globalThis as unknown as { __vapecrmBot?: boolean };
-  if (g.__vapecrmBot) return false;
-  g.__vapecrmBot = true;
-
+// Регистрируем обработчики и возвращаем бота — общий для polling и webhook,
+// чтобы поведение в облаке и локально было одинаковым
+export function buildBot(token: string): Bot {
   const bot = new Bot(token);
 
   bot.command("start", async (ctx) => {
@@ -35,7 +52,7 @@ export function startBot(token?: string): boolean {
         `Привет, ${client.name}! Ты уже подключён.\n\n/status <номер> — статус ремонта\n/book — записаться на ремонт\n/help — все команды`
       );
     }
-    awaitingPhone.add(ctx.chat.id);
+    await setDialog(ctx.chat.id, "phone");
     return ctx.reply(
       "Привет! Пришли свой номер телефона — например +375 25/29/33/44 123-45-67 (Беларусь) " +
         "или +7 916 123-45-67, и я буду сообщать, когда твой ремонт будет готов."
@@ -79,41 +96,43 @@ export function startBot(token?: string): boolean {
     if (!client) {
       return ctx.reply("Сначала подключись: /start и номер телефона.");
     }
-    if (awaitingPhone.has(ctx.chat.id)) {
+    const dialog = await getDialog(ctx.chat.id);
+    if (dialog?.state === "phone") {
       return ctx.reply("Сначала пришли номер телефона, потом записывайся :)");
     }
-    bookingFlow.set(ctx.chat.id, { step: "model" });
+    await setDialog(ctx.chat.id, "model");
     return ctx.reply("Записываемся! Какая модель устройства? (например Vaporesso XROS 3)");
   });
 
   bot.command("cancel", async (ctx) => {
-    const wasBooking = bookingFlow.delete(ctx.chat.id);
-    const wasPhone = awaitingPhone.delete(ctx.chat.id);
-    if (wasBooking || wasPhone) return ctx.reply("Отменил. Напиши /help, если что.");
+    const dialog = await getDialog(ctx.chat.id);
+    await clearDialog(ctx.chat.id);
+    if (dialog) return ctx.reply("Отменил. Напиши /help, если что.");
     return ctx.reply("Отменять нечего :)");
   });
 
   bot.on("message:text", async (ctx) => {
     const chatId = ctx.chat.id;
+    const dialog = await getDialog(chatId);
 
     // диалог записи на ремонт
-    const flow = bookingFlow.get(chatId);
-    if (flow) {
-      if (flow.step === "model") {
-        flow.model = ctx.message.text.trim();
-        flow.step = "problem";
+    if (dialog?.state === "model" || dialog?.state === "problem" || dialog?.state === "time") {
+      const payload = dialog.payload;
+      if (dialog.state === "model") {
+        payload.model = ctx.message.text.trim();
+        await setDialog(chatId, "problem", payload);
         return ctx.reply("Что случилось? (если не знаешь — просто «-»)");
       }
-      if (flow.step === "problem") {
-        flow.problem = ctx.message.text.trim();
-        flow.step = "time";
+      if (dialog.state === "problem") {
+        payload.problem = ctx.message.text.trim();
+        await setDialog(chatId, "time", payload);
         return ctx.reply(
           "Когда тебе удобно прийти? (например «завтра в 15:00», или «-» если как получится)"
         );
       }
       const client = await clientByChat(chatId);
       if (!client) {
-        bookingFlow.delete(chatId);
+        await clearDialog(chatId);
         return ctx.reply("Не нашёл тебя в базе — начни с /start и номера телефона.");
       }
       let preferredAt: Date | null = null;
@@ -127,14 +146,14 @@ export function startBot(token?: string): boolean {
       const order = await db.repairOrder.create({
         data: {
           clientId: client.id,
-          deviceModel: flow.model ?? "Не указана",
-          problem: flow.problem && flow.problem !== "-" ? flow.problem : "Запись через бота",
+          deviceModel: payload.model ?? "Не указана",
+          problem: payload.problem && payload.problem !== "-" ? payload.problem : "Запись через бота",
           status: "INTAKE",
           accessCode: generateAccessCode(),
           ...(preferredAt ? { preferredAt } : {}),
         },
       });
-      bookingFlow.delete(chatId);
+      await clearDialog(chatId);
       const timeLine = preferredAt
         ? `\nЖелаемое время: ${preferredAt.toLocaleString("ru-RU")} (подтвердим звонком)`
         : "\nМы позвоним и согласуем время.";
@@ -145,7 +164,7 @@ export function startBot(token?: string): boolean {
     }
 
     // привязка телефона
-    if (awaitingPhone.has(chatId)) {
+    if (dialog?.state === "phone") {
       const phone = normalizePhone(ctx.message.text);
       const client = await db.client.findUnique({ where: { phone } });
       if (!client) {
@@ -157,7 +176,7 @@ export function startBot(token?: string): boolean {
         where: { id: client.id },
         data: { telegramChatId: String(chatId) },
       });
-      awaitingPhone.delete(chatId);
+      await clearDialog(chatId);
       return ctx.reply(
         `Готово, ${client.name}! Буду писать, когда ремонт будет готов.\nЗаписаться на новый ремонт: /book`
       );
@@ -176,12 +195,52 @@ export function startBot(token?: string): boolean {
     ])
     .catch((e) => console.error("[бот] setMyCommands:", e));
 
-  // очередь исходящих: уведомления, напоминания о картриджах, «давно не забираете»
-  setInterval(async () => {
-    await pumpMessaging((chatId, text) => bot.api.sendMessage(chatId, text).then(() => {}));
-  }, 5000);
+  return bot;
+}
 
+const sender = (bot: Bot) => (chatId: string, text: string) => bot.api.sendMessage(chatId, text).then(() => {});
+
+// --- Локальный режим: long polling + периодическая прокачка очереди ---
+export function startBot(token?: string): boolean {
+  if (!token) {
+    console.warn("[бот] TELEGRAM_BOT_TOKEN не задан — бот не запущен (приложение работает без него)");
+    return false;
+  }
+  // защита от двойного старта (hot reload в dev)
+  const g = globalThis as unknown as { __vapecrmBot?: boolean };
+  if (g.__vapecrmBot) return false;
+  g.__vapecrmBot = true;
+
+  const bot = buildBot(token);
+  setInterval(async () => {
+    await pumpMessaging(sender(bot));
+  }, 5000);
   bot.start().catch((e) => console.error("[бот] остановлен:", e));
   console.log("[бот] запущен (long polling)");
   return true;
+}
+
+// --- Прод (Vercel): webhook. Telegram шлёт апдейты POST-ом, мы обрабатываем ---
+const gBot = globalThis as unknown as { __vapecrmWebhookBot?: Bot };
+
+export async function getWebhookBot(token: string): Promise<Bot> {
+  // один Bot на тёплый инстанс функции; init() один раз запрашивает getMe
+  if (!gBot.__vapecrmWebhookBot) {
+    const bot = buildBot(token);
+    await bot.init();
+    gBot.__vapecrmWebhookBot = bot;
+  }
+  return gBot.__vapecrmWebhookBot;
+}
+
+// Прокачать очередь уведомлений (используют webhook-роут, cron и after() в actions)
+export async function pumpViaBot(token: string): Promise<number> {
+  const bot = await getWebhookBot(token);
+  return pumpMessaging(sender(bot));
+}
+
+// Обработка одного апдейта из webhook (использует app/api/telegram/webhook/route.ts)
+export async function handleWebhookUpdate(token: string, update: Update): Promise<void> {
+  const bot = await getWebhookBot(token);
+  await bot.handleUpdate(update);
 }

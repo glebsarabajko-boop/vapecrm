@@ -2,11 +2,31 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { normalizePhone } from "@/lib/format";
 import { generateAccessCode } from "@/lib/codes";
 import { isRepairStatus, repairNotifyText } from "@/lib/repairs";
+
+// На проде прокачиваем очередь уведомлений сразу после запроса —
+// клиент получает «ремонт готов» без ожидания cron-а.
+// Локально очередь качает polling-бот (раз в 5 секунд), чтобы не дублировать.
+// Динамический импорт: bot.ts импортирует statusLabel отсюда — прямой импорт
+// создал бы цикл.
+function pumpNotificationsAfter() {
+  if (!process.env.VERCEL) return;
+  after(async () => {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    if (!token) return;
+    try {
+      const { pumpViaBot } = await import("@/lib/bot");
+      await pumpViaBot(token);
+    } catch (e) {
+      console.error("[after] pump:", e);
+    }
+  });
+}
 
 function toInt(value: FormDataEntryValue | null, fallback = 0) {
   const n = Number(value);
@@ -66,6 +86,7 @@ export async function setStatusAction(formData: FormData) {
         text: repairNotifyText(status, order.deviceModel, order.id),
       },
     });
+    pumpNotificationsAfter();
   }
 
   revalidatePath(`/repairs/${orderId}`);

@@ -1,10 +1,27 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { normalizePhone } from "@/lib/format";
 import { createSaleReminders } from "@/lib/messaging";
+
+// На проде сразу прокачиваем очередь бота (динамический импорт без циклов);
+// локально очередь качает polling-бот — здесь дублировать не нужно
+function pumpNotificationsAfter() {
+  if (!process.env.VERCEL) return;
+  after(async () => {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    if (!token) return;
+    try {
+      const { pumpViaBot } = await import("@/lib/bot");
+      await pumpViaBot(token);
+    } catch (e) {
+      console.error("[after] pump:", e);
+    }
+  });
+}
 
 export type SaleResult =
   | { ok: true; saleId: number; total: number }
@@ -56,6 +73,7 @@ export async function createSaleAction(
       return sale;
     });
 
+    pumpNotificationsAfter();
     revalidatePath("/inventory");
     return { ok: true, saleId: sale.id, total: sale.total };
   } catch (e) {
