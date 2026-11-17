@@ -37,8 +37,10 @@ git push → GitHub → Vercel автоматически пересобирае
 Neon даёт две строки подключения: пулед (для сайта) и прямую (для миграций).
 `DATABASE_URL` Vercel подставит сам, а вторую добавь вручную:
 
-1. В проекте Vercel: **Storage → твоя Neon-база** → `.env.local` tab (или в Neon Dashboard
-   → «Connection Details» → **Direct connection**) — найди строку с хостом **без** `-pooler`
+1. В проекте Vercel: **Storage → твоя Neon-база** → Connection Details (вкладка `.env.local`) →
+   проще всего скопировать значение переменной **`DATABASE_URL_UNPOOLED`** — это и есть прямая
+   строка (хост **без** `-pooler`). Альтернатива: Neon Dashboard → «Connection Details» →
+   режим **Direct connection**
 2. **Settings → Environment Variables → Add:**
    - Name: `DIRECT_URL`
    - Value: эта прямая строка (формат `postgresql://…@ep-…(без pooler)…/neondb?sslmode=require`)
